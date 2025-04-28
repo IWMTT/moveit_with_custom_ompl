@@ -10,6 +10,10 @@ find_package(catkin REQUIRED COMPONENTS
   pluginlib
   tf2
   dynamic_reconfigure
+  # added
+  std_msgs 
+  message_generation
+  # end of added
 )
 moveit_build_options()
 
@@ -20,6 +24,20 @@ endif()
 
 generate_dynamic_reconfigure_options("ompl_interface/cfg/OMPLDynamicReconfigure.cfg")
 
+
+# added
+add_service_files(
+  FILES
+  CustomCost.srv
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
+
+# end of added
+
 catkin_package(
   LIBRARIES
     moveit_ompl_interface
@@ -29,9 +47,14 @@ catkin_package(
     dynamic_reconfigure
     moveit_core
     roscpp
+    #added
+    std_msgs
+    message_runtime
+    #end of added
   DEPENDS
     OMPL
 )
+
 
 include_directories(ompl_interface/include)
 include_directories(SYSTEM

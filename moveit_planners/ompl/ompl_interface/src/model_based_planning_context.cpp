@@ -64,6 +64,128 @@
 #include "ompl/base/objectives/StateCostIntegralObjective.h"
 #include "ompl/base/objectives/MaximizeMinClearanceObjective.h"
 #include <ompl/geometric/planners/prm/LazyPRM.h>
+#include <ompl/base/OptimizationObjective.h>
+
+
+// ADD custom ompl related desctiptions here instead of customizing ompl
+// https://github.com/cairo-robotics/ompl/tree/master/src/ompl/base/objectives
+
+#include <ros/ros.h>
+#include <limits>
+#include <cstdlib>
+#include "moveit_planners_ompl/CustomCost.h"
+// #include <moveit/ompl_interface/model_based_planning_context.h> already included
+
+class CustomObjective : public ompl::base::MinimaxObjective
+{
+
+
+  public:CustomObjective(const ompl::base::SpaceInformationPtr& si) : ompl::base::MinimaxObjective(si)
+  {
+    this->setCostThreshold(ompl::base::Cost(std::numeric_limits<double>::infinity()));
+  }
+
+  ompl::base::Cost stateCost(const ompl::base::State *s) const override
+  {
+    // Static local variable to make sure to only print warning once
+    static bool printWarning = true;
+
+    // Create ROS client
+    ros::NodeHandle n;
+    ros::ServiceClient client = n.serviceClient<moveit_planners_ompl::CustomCost>("custom_cost"); 
+    moveit_planners_ompl::CustomCost srv;
+
+    // Pull out the model based state given by MoveIt!
+    // NOTE: This asumes a ModelBasedStateSpace is used. May not be the case on all systems!!
+    const ompl_interface::ModelBasedStateSpace::StateType *state = s->as<ompl_interface::ModelBasedStateSpace::StateType>();
+    unsigned int dimension = si_->getStateSpace()->getDimension();
+
+    // Build the service request
+    srv.request.state.clear();
+    for (unsigned int i = 0; i < dimension; ++i)
+    {
+        srv.request.state.push_back(state->values[i]);
+    }
+
+    // Request cost from ROS server (if call successful use that cost, else use clearance)
+    ompl::base::Cost costValue;
+    if (client.call(srv))
+    {
+        unsigned int type = srv.response.type;
+
+        switch (type)
+        {
+            case 0: // Use the returned cost
+                costValue = ompl::base::Cost(srv.response.cost);
+                break;
+            case 1: // Use infinite positive cost
+                costValue = identityCost();
+                break;
+            case 2: // Use infinite negative cost
+                costValue = infiniteCost();
+                break;
+            case 3: // Use clearance cost
+                costValue = ompl::base::Cost(si_->getStateValidityChecker()->clearance(s));
+                break;
+            case 4: // Use returned cost + clearance cost
+                costValue = ompl::base::Cost(1.0/(si_->getStateValidityChecker()->clearance(s))+srv.response.cost);
+                break;
+            default: // code to be executed if n doesn't match any cases
+                ROS_WARN("Invalid type value. Defaulting to clearance objective. Make sure your cost server is returning an int value 0-4.");
+                costValue = ompl::base::Cost(si_->getStateValidityChecker()->clearance(s));
+        }
+
+        // Print warning again if connection to server is lost
+        printWarning = true;
+    }
+    else
+    {
+        // Only print the warning once
+        if (printWarning)
+        {
+            ROS_WARN("Failed to call service custom_cost. Using clearance instead.");
+            printWarning = false;
+        }
+        costValue = ompl::base::Cost(si_->getStateValidityChecker()->clearance(s));
+    }
+
+    // Return cost as OMPL Cost object
+    return costValue;
+  }
+
+  
+  bool isCostBetterThan(ompl::base::Cost c1, ompl::base::Cost c2) const override
+  {
+      return c1.value() < c2.value(); //
+  }
+
+
+  ompl::base::Cost motionCost(const ompl::base::State *s1, const ompl::base::State *s2) const override
+  {
+    return this->combineCosts(this->stateCost(s1), this->stateCost(s2));
+  }
+
+  ompl::base::Cost identityCost() const override
+  {
+      return ompl::base::Cost(-std::numeric_limits<double>::infinity());
+  }
+
+  ompl::base::Cost infiniteCost() const override
+  {
+      return  ompl::base::Cost(std::numeric_limits<double>::infinity());
+  }
+
+  ompl::base::Cost combineCosts(ompl::base::Cost c1, ompl::base::Cost c2) const override
+  {
+    if (c1.value() > c2.value()) 
+    return c1;
+    else
+    return c2;
+  }
+};
+
+
+// END of ADD custom ompl related desctiptions here instead of customizing ompl
 
 namespace ompl_interface
 {
@@ -319,6 +441,11 @@ void ompl_interface::ModelBasedPlanningContext::useConfig()
     {
       objective =
           std::make_shared<ompl::base::MaximizeMinClearanceObjective>(ompl_simple_setup_->getSpaceInformation());
+    }
+    else if (optimizer == "CustomObjective")
+    {
+      objective =
+          std::make_shared<CustomObjective>(ompl_simple_setup_->getSpaceInformation());
     }
     else
     {
