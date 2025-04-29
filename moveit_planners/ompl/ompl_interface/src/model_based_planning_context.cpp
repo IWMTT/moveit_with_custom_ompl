@@ -82,7 +82,7 @@ class CustomObjective : public ompl::base::MinimaxObjective
 
   public:CustomObjective(const ompl::base::SpaceInformationPtr& si) : ompl::base::MinimaxObjective(si)
   {
-    this->setCostThreshold(ompl::base::Cost(std::numeric_limits<double>::infinity()));
+    this->setCostThreshold(ompl::base::Cost(0.0));
   }
 
   ompl::base::Cost stateCost(const ompl::base::State *s) const override
